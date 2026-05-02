@@ -352,7 +352,9 @@ async function selectRelevantParagraphs(scrapedData, question) {
 
 // Keywords that always force advanced routing without calling the classifier
 const ADVANCED_KEYWORDS_RE =
-    /詳しく|詳細|深く|高度|複雑|徹底|本格|専門|分析|比較|評価|考察|解説|仕組み|アーキテクチャ|480b|480B|api.?key|apikey|secret|token|credential|ハードコード|セキュリティ|脆弱/i;
+    /詳しく|詳細|深く|高度|複雑|徹底|本格|専門|分析|比較|評価|考察|解説|仕組み|アーキテクチャ|480b|480B|api.?key|apikey|secret|token|credential|ハードコード|セキュリティ|脆弱|上位|上位モデル/i;
+
+const UPGRADE_MODEL_RE = /上位|上位モデル|別.*モデル|モデル.*変|より.*賢/i;
 
 async function isAdvancedQuestion(question) {
     if (ADVANCED_KEYWORDS_RE.test(question)) return true;
@@ -372,13 +374,17 @@ async function isAdvancedQuestion(question) {
     return result.trim().toLowerCase().startsWith('advanced');
 }
 
-function buildThreadMessages(context, question, overrideScrapedData = null, includeScripts = false, model = '') {
+function buildThreadMessages(context, question, overrideScrapedData = null, includeScripts = false, model = '', previousModel = '') {
+    const prevNote = previousModel
+        ? `この会話の要約は ${previousModel} が生成しました。あなた（${model}）はより高性能なモデルとして、より詳細な分析や回答を提供してください。`
+        : '';
     return [
         {
             role: 'system',
             content:
                 'あなたはWebページの内容についての質問に答えるDiscord Botのアシスタントです。' +
                 (model ? `現在あなたは ${model} として動作しています。` : '') +
+                (prevNote ? prevNote : '') +
                 'ウェブ検索はできませんが、[FETCH: https://...] の形式でURLを指定すると該当ページを取得して回答に使用できます。' +
                 '【重要】回答は必ず日本語で書いてください。英語は一切使わないでください。' +
                 '以下のスクレイピングされた情報を参照して、正確かつ丁寧に日本語で回答してください。\n\n' +
@@ -413,9 +419,10 @@ async function handleUrlMessage(message, url) {
         .filter(l => !isPrivateUrl(l) && isUsefulRecursiveUrl(l))
         .slice(0, 10);
 
-    const hasImages = (mainResult.images ?? []).length > 0;
+    const isGithub = !!extractGithubRepo(url);
+    const hasImages = !isGithub && (mainResult.images ?? []).length > 0;
     const model = hasImages ? MODELS.SUMMARY_IMAGE : MODELS.SUMMARY_TEXT;
-    console.log(`[URL] summarizing with ${model}`);
+    console.log(`[URL] summarizing with ${model}${isGithub ? ' (GitHub — images ignored)' : ''}`);
 
     let summary;
     try {
@@ -442,6 +449,7 @@ async function handleUrlMessage(message, url) {
         originalUrl: url,
         scrapedData: [mainResult],
         availableLinks,
+        summaryModel: model,
         history: [],
     });
 
@@ -470,7 +478,8 @@ async function handleThreadMessage(message) {
             }
         }
 
-        answer = await callAIWithTools(answerModel, buildThreadMessages(context, message.content, overrideData, advanced, answerModel));
+        const previousModel = UPGRADE_MODEL_RE.test(message.content) ? (context.summaryModel ?? '') : '';
+        answer = await callAIWithTools(answerModel, buildThreadMessages(context, message.content, overrideData, advanced, answerModel, previousModel));
     } catch (err) {
         console.error('[Thread] answer error:', err.message);
         await message.reply('エラーが発生しました。もう一度お試しください。');

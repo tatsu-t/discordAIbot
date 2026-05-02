@@ -372,15 +372,16 @@ async function isAdvancedQuestion(question) {
     return result.trim().toLowerCase().startsWith('advanced');
 }
 
-function buildThreadMessages(context, question, overrideScrapedData = null, includeScripts = false) {
+function buildThreadMessages(context, question, overrideScrapedData = null, includeScripts = false, model = '') {
     return [
         {
             role: 'system',
             content:
-                'あなたはWebページの内容についての質問に答えるアシスタントです。' +
+                'あなたはWebページの内容についての質問に答えるDiscord Botのアシスタントです。' +
+                (model ? `現在あなたは ${model} として動作しています。` : '') +
+                'ウェブ検索はできませんが、[FETCH: https://...] の形式でURLを指定すると該当ページを取得して回答に使用できます。' +
                 '【重要】回答は必ず日本語で書いてください。英語は一切使わないでください。' +
-                '以下のスクレイピングされた情報を参照して、正確かつ丁寧に日本語で回答してください。' +
-                '情報が不足している場合は [FETCH: https://...] の形式でURLを指定すると追加情報を取得できます。\n\n' +
+                '以下のスクレイピングされた情報を参照して、正確かつ丁寧に日本語で回答してください。\n\n' +
                 buildScrapedContext(overrideScrapedData ?? context.scrapedData, includeScripts),
         },
         ...context.history.slice(-MAX_CONTEXT_HISTORY),
@@ -444,7 +445,7 @@ async function handleUrlMessage(message, url) {
         history: [],
     });
 
-    await sendLong(thread, summary);
+    await sendLong(thread, `${summary}\n-# model: ${model}`);
 }
 
 async function handleThreadMessage(message) {
@@ -455,10 +456,11 @@ async function handleThreadMessage(message) {
     try { await message.channel.sendTyping(); } catch (_) {}
 
     let answer;
+    let answerModel;
     try {
         const advanced = await isAdvancedQuestion(message.content);
-        const model = advanced ? MODELS.LARGE : MODELS.SUMMARY_TEXT;
-        console.log(`[Thread] classified as ${advanced ? 'advanced' : 'basic'} → ${model}`);
+        answerModel = advanced ? MODELS.LARGE : MODELS.SUMMARY_TEXT;
+        console.log(`[Thread] classified as ${advanced ? 'advanced' : 'basic'} → ${answerModel}`);
 
         let overrideData = null;
         if (!advanced) {
@@ -468,7 +470,7 @@ async function handleThreadMessage(message) {
             }
         }
 
-        answer = await callAIWithTools(model, buildThreadMessages(context, message.content, overrideData, advanced));
+        answer = await callAIWithTools(answerModel, buildThreadMessages(context, message.content, overrideData, advanced, answerModel));
     } catch (err) {
         console.error('[Thread] answer error:', err.message);
         await message.reply('エラーが発生しました。もう一度お試しください。');
@@ -480,7 +482,7 @@ async function handleThreadMessage(message) {
         { role: 'assistant', content: answer },
     );
 
-    await replyLong(message, answer);
+    await replyLong(message, `${answer}\n-# model: ${answerModel}`);
 }
 
 // ─── Event Listeners ──────────────────────────────────────────────────────────

@@ -58,7 +58,7 @@ Sakura AI API        (https://api.ai.sakura.ad.jp/v1/chat/completions)
 1. リポジトリをクローン
 
 ```bash
-git clone https://github.com/yourname/discordAIbot.git
+git clone https://github.com/tatsu-t/discordAIbot.git
 cd discordAIbot
 ```
 

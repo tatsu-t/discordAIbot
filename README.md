@@ -113,3 +113,8 @@ discordAIbot/
 | `DISCORD_TOKEN` | Discord BotのAPIトークン |
 | `SAKURA_API_KEY` | Sakura AI APIキー |
 | `SCRAPER_API_URL` | スクレイパーAPIのURL（docker-composeで自動設定） |
+
+## 使用ライブラリ・謝辞
+
+スクレイピング部分には [Scrapling](https://github.com/D4Vinci/Scrapling) を使用しています。
+ボット検知回避・高速なページ取得・XPathによるコンテンツ抽出など、このプロジェクトの核心機能を支えています。ありがとうございます。

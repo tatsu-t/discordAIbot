@@ -16,6 +16,7 @@ const MODELS = {
     SUMMARY_TEXT:  'Qwen3-Coder-30B-A3B-Instruct',
     SUMMARY_IMAGE: 'preview/Phi-4-multimodal-instruct',
     SMALL:         'preview/Qwen3-0.6B-cpu',
+    SELECTOR:      'preview/Phi-4-mini-instruct-cpu',
     LARGE:         'Qwen3-Coder-480B-A35B-Instruct-FP8',
 };
 
@@ -34,7 +35,8 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp|bmp)(\?[^#]*)?$/i;
 
 const SCRAPER_TIMEOUT_MS   = 60_000;
 const AI_TIMEOUT_MS        = 300_000;  // 5 min — large models take time
-const MAX_CONTEXT_CHARS    = 12_000;   // total chars sent to AI across all pages
+const MAX_CONTEXT_CHARS         = 12_000;
+const MAX_CONTEXT_CHARS_ADVANCED = 300_000;
 const MAX_RECURSIVE_URLS = 5;
 const MAX_DISCORD_MSG_LEN = 2000;
 const MAX_CONTEXT_HISTORY = 10;
@@ -232,18 +234,22 @@ async function callAIWithTools(model, messages) {
 
 // ─── Prompt Helpers ───────────────────────────────────────────────────────────
 
-function buildScrapedContext(results) {
+function buildScrapedContext(results, includeScripts = false) {
+    const maxChars = includeScripts ? MAX_CONTEXT_CHARS_ADVANCED : MAX_CONTEXT_CHARS;
     const parts = results.map((r, i) => {
         if (r.error) return `[Page ${i + 1}: ${r.url}]\nError: ${r.error}`;
-        return `[Page ${i + 1}: ${r.url}]\nTitle: ${r.title ?? '(no title)'}\n${r.text}`;
+        let content = `[Page ${i + 1}: ${r.url}]\nTitle: ${r.title ?? '(no title)'}\n${r.text}`;
+        if (includeScripts && r.scripts) {
+            content += `\n\n[Scripts]\n${r.scripts}`;
+        }
+        return content;
     });
 
-    // Trim total length to avoid overwhelming the model
     const combined = [];
     let total = 0;
     for (const part of parts) {
-        if (total + part.length > MAX_CONTEXT_CHARS) {
-            const remaining = MAX_CONTEXT_CHARS - total;
+        if (total + part.length > maxChars) {
+            const remaining = maxChars - total;
             if (remaining > 200) combined.push(part.slice(0, remaining));
             break;
         }
@@ -306,9 +312,47 @@ async function generateSummary(results, model, images, originalUrl, availableLin
     ]);
 }
 
+// ─── Paragraph Selector ───────────────────────────────────────────────────────
+
+async function selectRelevantParagraphs(scrapedData, question) {
+    const allParas = scrapedData.flatMap(r =>
+        r.error ? [] : (r.text ?? '').split('\n').filter(p => p.trim().length > 30),
+    );
+    if (allParas.length <= 20) return null;
+
+    const numbered = allParas
+        .map((p, i) => `[${i}] ${p.slice(0, 200)}`)
+        .join('\n')
+        .slice(0, 5000);
+
+    try {
+        const result = await callAI(MODELS.SELECTOR, [
+            {
+                role: 'system',
+                content: 'Return only comma-separated indices of paragraphs relevant to the question. Numbers only.',
+            },
+            {
+                role: 'user',
+                content: `質問: "${question}"\n\n${numbered}`,
+            },
+        ]);
+
+        const indices = [...new Set(
+            (result.match(/\d+/g) ?? []).map(Number).filter(i => i < allParas.length),
+        )].sort((a, b) => a - b);
+
+        if (indices.length === 0) return null;
+        console.log(`[Selector] selected ${indices.length}/${allParas.length} paragraphs`);
+        return indices.map(i => allParas[i]).join('\n');
+    } catch (err) {
+        console.warn('[Selector] failed, using full context:', err.message);
+        return null;
+    }
+}
+
 // Keywords that always force advanced routing without calling the classifier
 const ADVANCED_KEYWORDS_RE =
-    /詳しく|詳細|深く|高度|複雑|徹底|本格|専門|分析|比較|評価|考察|解説|仕組み|アーキテクチャ|480b|480B/i;
+    /詳しく|詳細|深く|高度|複雑|徹底|本格|専門|分析|比較|評価|考察|解説|仕組み|アーキテクチャ|480b|480B|api.?key|apikey|secret|token|credential|ハードコード|セキュリティ|脆弱/i;
 
 async function isAdvancedQuestion(question) {
     if (ADVANCED_KEYWORDS_RE.test(question)) return true;
@@ -328,7 +372,7 @@ async function isAdvancedQuestion(question) {
     return result.trim().toLowerCase().startsWith('advanced');
 }
 
-function buildThreadMessages(context, question) {
+function buildThreadMessages(context, question, overrideScrapedData = null, includeScripts = false) {
     return [
         {
             role: 'system',
@@ -337,7 +381,7 @@ function buildThreadMessages(context, question) {
                 '【重要】回答は必ず日本語で書いてください。英語は一切使わないでください。' +
                 '以下のスクレイピングされた情報を参照して、正確かつ丁寧に日本語で回答してください。' +
                 '情報が不足している場合は [FETCH: https://...] の形式でURLを指定すると追加情報を取得できます。\n\n' +
-                buildScrapedContext(context.scrapedData),
+                buildScrapedContext(overrideScrapedData ?? context.scrapedData, includeScripts),
         },
         ...context.history.slice(-MAX_CONTEXT_HISTORY),
         { role: 'user', content: question },
@@ -415,7 +459,16 @@ async function handleThreadMessage(message) {
         const advanced = await isAdvancedQuestion(message.content);
         const model = advanced ? MODELS.LARGE : MODELS.SUMMARY_TEXT;
         console.log(`[Thread] classified as ${advanced ? 'advanced' : 'basic'} → ${model}`);
-        answer = await callAIWithTools(model, buildThreadMessages(context, message.content));
+
+        let overrideData = null;
+        if (!advanced) {
+            const selectedText = await selectRelevantParagraphs(context.scrapedData, message.content);
+            if (selectedText) {
+                overrideData = [{ url: context.originalUrl, title: null, text: selectedText }];
+            }
+        }
+
+        answer = await callAIWithTools(model, buildThreadMessages(context, message.content, overrideData, advanced));
     } catch (err) {
         console.error('[Thread] answer error:', err.message);
         await message.reply('エラーが発生しました。もう一度お試しください。');

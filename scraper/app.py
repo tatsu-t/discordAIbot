@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-MAX_TEXT_LENGTH = 8000
+MAX_TEXT_LENGTH = 300000
+MAX_SCRIPTS_LENGTH = 100000
 MAX_IMAGES = 20
 MAX_LINKS = 50
 MAX_CONCURRENT = 5
@@ -29,6 +30,7 @@ class ScrapeResult(BaseModel):
     url: str
     title: Optional[str] = None
     text: str = ""
+    scripts: str = ""
     images: list[str] = []
     links: list[str] = []
     error: Optional[str] = None
@@ -140,7 +142,15 @@ async def _scrape(url: str) -> ScrapeResult:
             nodes = page.xpath(f"//body//text()[{NOISE_EXCLUDE}]").getall()
             text_nodes = [t.strip() for t in nodes if t.strip()]
 
-        text = " ".join(text_nodes)
+        text = "\n".join(text_nodes)
+
+        script_nodes = page.xpath(
+            "//script[not(@src) and ("
+            "not(@type) or @type='application/ld+json' "
+            "or @type='text/javascript' or @type='module'"
+            ")]//text()"
+        ).getall()
+        scripts_text = "\n".join(s.strip() for s in script_nodes if s.strip())
 
         img_srcs = page.css("img::attr(src)").getall()
         img_data_srcs = page.css("img::attr(data-src)").getall()
@@ -164,6 +174,7 @@ async def _scrape(url: str) -> ScrapeResult:
             url=url,
             title=title,
             text=text[:MAX_TEXT_LENGTH],
+            scripts=scripts_text[:MAX_SCRIPTS_LENGTH],
             images=images,
             links=links,
         )

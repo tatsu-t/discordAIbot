@@ -1,12 +1,14 @@
 services:
   scraperapi:
     build: ./scraper
+    restart: unless-stopped
     container_name: scraper-api
     ports:
       - "8000:8000"
 
   bot:
     build: ./bot
+    restart: unless-stopped
     container_name: discord-bot
     env_file:
       - ./bot/.env

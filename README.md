@@ -72,15 +72,8 @@ cp bot/.env.example bot/.env
 ```env
 DISCORD_TOKEN=your_discord_bot_token
 SAKURA_API_KEY=your_sakura_api_key
-```
-
-3. チャンネルIDを設定
-
-`bot/main.js` の以下の定数を自分のサーバーのチャンネルIDに変更：
-
-```js
-const CHANNEL_ANY_URL     = '...';
-const CHANNEL_MENTION_ONLY = '...';
+CHANNEL_ANY_URL=your_channel_id_here
+CHANNEL_MENTION_ONLY=your_channel_id_here
 ```
 
 4. 起動

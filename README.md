@@ -89,6 +89,11 @@ Discord Developer Portal で以下を有効にしてください：
 - Privileged Gateway Intents: `MESSAGE CONTENT INTENT`
 - Bot Permissions: `Send Messages`, `Create Public Threads`, `Send Messages in Threads`, `Read Message History`
 
+## sakuraAI以外を使用する場合
+bot/main.jsの
+const SAKURA_API_URL = 'https://api.ai.sakura.ad.jp/v1/chat/completions';
+を任意のopenAIエンドポイントURLを入力
+
 ## ディレクトリ構成
 
 ```

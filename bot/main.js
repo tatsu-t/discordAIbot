@@ -306,14 +306,22 @@ async function generateSummary(results, model, images, originalUrl, availableLin
     ]);
 }
 
+// Keywords that always force advanced routing without calling the classifier
+const ADVANCED_KEYWORDS_RE =
+    /詳しく|詳細|深く|高度|複雑|徹底|本格|専門|分析|比較|評価|考察|解説|仕組み|アーキテクチャ|480b|480B/i;
+
 async function isAdvancedQuestion(question) {
+    if (ADVANCED_KEYWORDS_RE.test(question)) return true;
+
     const result = await callAI(MODELS.SMALL, [
         {
             role: 'system',
             content:
                 'You are a question complexity classifier. Reply with exactly one word: "advanced" or "basic".\n' +
-                '"advanced": requires deep technical knowledge, complex reasoning, or detailed multi-step analysis.\n' +
-                '"basic": simple factual lookups, short explanations, or straightforward questions.',
+                '"advanced": deep technical knowledge, complex reasoning, detailed analysis, architecture, comparison, evaluation.\n' +
+                '"basic": simple facts, short explanations, yes/no questions, brief summaries.\n' +
+                'Examples — advanced: "仕組みを詳しく教えて" "アーキテクチャを説明して" "compare X and Y in depth"\n' +
+                'Examples — basic: "これは何？" "いつ作られた？" "what is this?"',
         },
         { role: 'user', content: question },
     ]);
